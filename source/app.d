@@ -4,6 +4,8 @@ import std.stdio;
 import glfw3.api;
 import dgui;
 import bindbc.opengl.util;
+import std.algorithm;
+
 
 extern(C) @nogc nothrow void errorCallback(int error, const(char)* description) {
 	import core.stdc.stdio;
@@ -52,13 +54,15 @@ enum Instruction : ubyte
 ubyte[3][Instruction] instructionToColor = [
 Instruction.PRESET_MEMORY: [128,0,0],
 Instruction.PRESET_BORDER: [0,128,0],
-Instruction.WRITE_FONT: [255,255,255],
+Instruction.WRITE_FONT: [0,0,0],
 Instruction.SCROLL_PRESET: [127,255,255],
 Instruction.SCROLL_COPY: [127,0,255],
 Instruction.DEFINE_TRANSPARENT: [127,127,0],
 Instruction.LOAD_CLUT0: [255,0,0],
 Instruction.LOAD_CLUT8: [255,127,127],
-Instruction.XOR_FONT: [0,255,0],
+Instruction.XOR_FONT: [0,32,0],
+Instruction.EX_MEMORY_CONTROL: [255,96,0],
+Instruction.EX_XOR_ADDITONAL: [127,255,127],
 ];
 
 struct PACK
@@ -117,7 +121,7 @@ void ParseExtendedPack(PACK p)
 		WM[0] = p.DATA[0]&0b11;
 		DM[1] = p.DATA[1]>>2;
 		WM[1] = p.DATA[1]&0b11;
-		writeln(DM," ",WM);
+		//writeln(DM[0],",",WM[0]);
 	}
 	else if(p.instruction == Instruction.WRITE_FONT)
 	{
@@ -125,7 +129,8 @@ void ParseExtendedPack(PACK p)
 		{
 			foreach(collumn; 0..6)
 			{
-				PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				ubyte col = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = col;
 			}
 		}
 	}
@@ -135,7 +140,8 @@ void ParseExtendedPack(PACK p)
 		{
 			foreach(collumn; 0..6)
 			{
-				PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				ubyte col = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= col;
 			}
 		}
 	}
@@ -145,8 +151,17 @@ void ParseExtendedPack(PACK p)
 		{
 			ulong j = i << 1;
 			ulong index = i+(p.instruction-Instruction.EX_LOAD_CLUT_BEGIN)*8;
-			ColorTable[index][] &= 0xf;
-			ColorTable[index][] |= [cast(ubyte)((p.DATA[j]&0b111100)<<2),cast(ubyte)(((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x1100)<<2)),cast(ubyte)(((p.DATA[j+1]&0b1111)<<4))];
+			ubyte[3] col = [cast(ubyte)((p.DATA[j]&0b111100)<<2),cast(ubyte)(((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x110000)<<2)),cast(ubyte)(((p.DATA[j+1]&0b1111)<<4))];
+			if((WM[0] & 1) != 0)
+			{
+				ColorTable[index][] &= 0xf;
+				ColorTable[index][] |= col[];
+			}
+			if((WM[0] & 2) != 0)
+			{
+				ColorTable[index][] &= 0xf;
+				ColorTable[index][] |= col[];
+			}
 		}
 	}
 	else if(p.instruction >= Instruction.EX_LOAD_CLUT_ADDITIONAL_BEGIN && p.instruction <= Instruction.EX_LOAD_CLUT_ADDITIONAL_END)
@@ -155,22 +170,35 @@ void ParseExtendedPack(PACK p)
 		{
 			ulong j = i;
 			ulong index = i+(p.instruction-Instruction.EX_LOAD_CLUT_ADDITIONAL_BEGIN)*16;
-			ColorTable[index][] &= 0xf0;
-			ColorTable[index][] |= [cast(ubyte)((p.DATA[j]&0b110000)>>2),cast(ubyte)(p.DATA[j]&0b1100),cast(ubyte)((p.DATA[j]&0b11)<<2)];
+			ubyte[3] col = [cast(ubyte)((p.DATA[j]&0b110000)>>2),cast(ubyte)(p.DATA[j]&0b1100),cast(ubyte)((p.DATA[j]&0b11)<<2)];
+			if((WM[0] & 1) != 0)
+			{
+				ColorTable[index][] &= 0xf0;
+				ColorTable[index][] |= col[];
+			}
+			if((WM[0] & 2) != 0)
+			{
+				ColorTable[index][] &= 0xf0;
+				ColorTable[index][] |= col[];
+			}
 		}
+	}
+	else
+	{
+		writeln("invalid ",p.instruction);
 	}
 }
 
-void ParsePack(PACK p)
+bool ParsePack(PACK p)
 {
 	if(p.mode == 0 && p.item == 0)
 	{
-		return;
+		return true;
 	}
 	if(p.mode == 2 && p.item == 1)
 	{
 		ParseExtendedPack(p);
-		return;
+		return false;
 	}
 	if(p.instruction == Instruction.WRITE_FONT)
 	{
@@ -178,7 +206,15 @@ void ParsePack(PACK p)
 		{
 			foreach(collumn; 0..6)
 			{
-				PIXELS[0][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				ubyte col = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				if((WM[0] & 1) != 0)
+				{
+					PIXELS[0][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = col;
+				}
+				if((WM[0] & 2) != 0)
+				{
+					PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = col;
+				}
 			}
 		}
 	}
@@ -188,7 +224,15 @@ void ParsePack(PACK p)
 		{
 			foreach(collumn; 0..6)
 			{
-				PIXELS[0][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				ubyte col = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
+				if((WM[0] & 1) != 0)
+				{
+					PIXELS[0][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= col;
+				}
+				if((WM[0] & 2) != 0)
+				{
+					PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= col;
+				}
 			}
 		}
 	}
@@ -198,7 +242,15 @@ void ParsePack(PACK p)
 		foreach(i; 0..8)
 		{
 			ulong j = i << 1;
-			ColorTable[i] = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x1100)<<2),((p.DATA[j+1]&0b1111)<<4)];
+			ubyte[3] col = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x110000)<<2),((p.DATA[j+1]&0b1111)<<4)];
+			if((WM[0] & 1) != 0)
+			{
+				ColorTable[i] = col;
+			}
+			if((WM[0] & 2) != 0)
+			{
+				ColorTable[i+16] = col;
+			}
 		}
 	}
 	else if(p.instruction == Instruction.LOAD_CLUT8)
@@ -206,7 +258,15 @@ void ParsePack(PACK p)
 		foreach(i; 0..8)
 		{
 			ulong j = i << 1;
-			ColorTable[i+8] = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x1100)<<2),((p.DATA[j+1]&0b1111)<<4)];
+			ubyte[3] col = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x110000)<<2),((p.DATA[j+1]&0b1111)<<4)];
+			if((WM[0] & 1) != 0)
+			{
+				ColorTable[i+8] = col;
+			}
+			if((WM[0] & 2) != 0)
+			{
+				ColorTable[i+8+16] = col;
+			}
 		}
 	}
 	else if(p.instruction == Instruction.PRESET_MEMORY)
@@ -215,7 +275,14 @@ void ParsePack(PACK p)
 		{
 			foreach(collumn; 0..50*6)
 			{
-				PIXELS[0][row][collumn] = p.DATA[0];
+				if((WM[0] & 1) != 0)
+				{
+					PIXELS[0][row][collumn] = p.DATA[0];
+				}
+				if((WM[0] & 2) != 0)
+				{
+					PIXELS[1][row][collumn] = p.DATA[0];
+				}
 			}
 		}
 		
@@ -232,93 +299,105 @@ void ParsePack(PACK p)
 		PH = p.DATA[1]&0x7;
 		ubyte COPV = p.DATA[2]>>4;
 		PV = p.DATA[2]&0xf;
-		if(COPV == 2)
-		{
-			ubyte[50*6][18*12] temp;
-			temp[][] = PIXELS[0][][];
-			
-			foreach(row; 12..18*12)
-			{
-				foreach(collumn; 0..50*6)
-				{
-					PIXELS[0][row-12][collumn] = temp[row][collumn];
-				}
-			}
-			foreach(row; 0..12)
-			{
-				foreach(collumn; 0..50*6)
-				{
-					PIXELS[0][row+17*12][collumn] = temp[row][collumn];
-				}
-			}
-		}
-		else if(COPV == 1)
-		{
-			ubyte[50*6][18*12] temp;
-			temp[][] = PIXELS[0][][];
-			
-			foreach(row; 0..17*12)
-			{
-				foreach(collumn; 0..50*6)
-				{
-					PIXELS[0][row+12][collumn] = temp[row][collumn];
-				}
-			}
-			foreach(row; 0..12)
-			{
-				foreach(collumn; 0..50*6)
-				{
-					PIXELS[0][row][collumn] = temp[row+17*12][collumn];
-				}
-			}
-		}
 		
-		if(COPH == 2)
+		void DoScroll(ubyte wm)
 		{
-			ubyte[50*6][18*12] temp;
-			temp[][] = PIXELS[0][][];
-			
-			foreach(row; 0..18*12)
+			if(COPV == 2)
 			{
-				foreach(collumn; 6..50*6)
+				ubyte[50*6][18*12] temp;
+				temp[][] = PIXELS[wm][][];
+				
+				foreach(row; 12..18*12)
 				{
-					PIXELS[0][row][collumn-6] = temp[row][collumn];
+					foreach(collumn; 0..50*6)
+					{
+						PIXELS[wm][row-12][collumn] = temp[row][collumn];
+					}
+				}
+				foreach(row; 0..12)
+				{
+					foreach(collumn; 0..50*6)
+					{
+						PIXELS[wm][row+17*12][collumn] = temp[row][collumn];
+					}
 				}
 			}
-			foreach(row; 0..18*12)
+			else if(COPV == 1)
 			{
-				foreach(collumn; 0..6)
+				ubyte[50*6][18*12] temp;
+				temp[][] = PIXELS[wm][][];
+				
+				foreach(row; 0..17*12)
 				{
-					PIXELS[0][row][collumn+49*6] = temp[row][collumn];
+					foreach(collumn; 0..50*6)
+					{
+						PIXELS[wm][row+12][collumn] = temp[row][collumn];
+					}
+				}
+				foreach(row; 0..12)
+				{
+					foreach(collumn; 0..50*6)
+					{
+						PIXELS[wm][row][collumn] = temp[row+17*12][collumn];
+					}
+				}
+			}
+			
+			if(COPH == 2)
+			{
+				ubyte[50*6][18*12] temp;
+				temp[][] = PIXELS[wm][][];
+				
+				foreach(row; 0..18*12)
+				{
+					foreach(collumn; 6..50*6)
+					{
+						PIXELS[wm][row][collumn-6] = temp[row][collumn];
+					}
+				}
+				foreach(row; 0..18*12)
+				{
+					foreach(collumn; 0..6)
+					{
+						PIXELS[wm][row][collumn+49*6] = temp[row][collumn];
+					}
+				}
+			}
+			else if(COPH == 1)
+			{
+				ubyte[50*6][18*12] temp;
+				temp[][] = PIXELS[wm][][];
+				
+				foreach(row; 0..18*12)
+				{
+					foreach(collumn; 0..49*6)
+					{
+						PIXELS[wm][row][collumn+6] = temp[row][collumn];
+					}
+				}
+				foreach(row; 0..18*12)
+				{
+					foreach(collumn; 0..6)
+					{
+						PIXELS[wm][row][collumn] = temp[row][collumn+49*6];
+					}
 				}
 			}
 		}
-		else if(COPH == 1)
+		if((WM[0] & 1) != 0)
 		{
-			ubyte[50*6][18*12] temp;
-			temp[][] = PIXELS[0][][];
-			
-			foreach(row; 0..18*12)
-			{
-				foreach(collumn; 0..49*6)
-				{
-					PIXELS[0][row][collumn+6] = temp[row][collumn];
-				}
-			}
-			foreach(row; 0..18*12)
-			{
-				foreach(collumn; 0..6)
-				{
-					PIXELS[0][row][collumn] = temp[row][collumn+49*6];
-				}
-			}
+			DoScroll(0);
 		}
-		
+		if((WM[0] & 2) != 0)
+		{
+			DoScroll(1);
+		}
 	}
 	else
 	{
 		writeln("invalid ",p.instruction);
 	}
+	return false;
 }
 
 
@@ -357,15 +436,37 @@ class TimelinePanel : Panel
 				break;
 			}
 			PACK p = cdg[playindex+i];
-			if(p.mode != 1 || p.item != 1)
+			if(p.mode == 1 && p.item == 1)
 			{
-				continue;
+				ubyte[3] col = instructionToColor[p.instruction];
+				glBlendColor4ub(col[0],col[1],col[2],255);
+				DGUI_FillRect(i,4,1,8);
 			}
-			ubyte[3] col = instructionToColor[p.instruction];
-			glBlendColor4ub(col[0],col[1],col[2],255);
-			DGUI_FillRect(i,4,1,16);
-			
+			else if(p.mode == 2 && p.item == 1)
+			{
+				if(p.instruction >= Instruction.EX_LOAD_CLUT_BEGIN && p.instruction <= Instruction.EX_LOAD_CLUT_END)
+				{
+					glBlendColor4ub(0,0,127,255);
+					DGUI_FillRect(i,p.instruction-Instruction.EX_LOAD_CLUT_BEGIN,1,8);
+				}
+				else if(p.instruction >= Instruction.EX_LOAD_CLUT_ADDITIONAL_BEGIN && p.instruction <= Instruction.EX_LOAD_CLUT_ADDITIONAL_END)
+				{
+					glBlendColor4ub(32,0,255,255);
+					DGUI_FillRect(i,p.instruction-Instruction.EX_LOAD_CLUT_ADDITIONAL_BEGIN,1,8);
+				}
+				else
+				{
+					ubyte[3] col = instructionToColor[p.instruction];
+					glBlendColor4ub(col[0],col[1],col[2],255);
+					DGUI_FillRect(i,12,1,8);
+				}
+			}
 		}
+		foreach(i, col; ColorTable)		{
+			glBlendColor4ub(col[0],col[1],col[2],255);
+			DGUI_FillRect(cast(int)(i*8),24,8,8);
+		}
+
 	}
 }
 
@@ -396,21 +497,35 @@ class DisplayScreenPanel : Panel
 			{
 				ulong p = (posmod((collumn-PH),(50*6))+posmod((row-PV),(18*12))*50*6) * 3;
 				ubyte layer0 = PIXELS[0][row][collumn];
+				ubyte layer1 = PIXELS[1][row][collumn];
 				if(DM[0] == 0 && WM[0] == 3)
 				{
-					ubyte layer1 = PIXELS[1][row][collumn];
 					ubyte[3] col = ColorTable[(layer1<<4)+layer0];
 					ComputedPixels[p] = cast(ubyte)(col[0]);
 					ComputedPixels[p+1] = cast(ubyte)(col[1]);
 					ComputedPixels[p+2] = cast(ubyte)(col[2]);
-					
 				}
-				else
+				else if(DM[0] == 1)
 				{
 					ubyte[3] col = ColorTable[layer0];
 					ComputedPixels[p] = col[0];
 					ComputedPixels[p+1] = col[1];
 					ComputedPixels[p+2] = col[2];
+				}
+				else if(DM[0] == 2)
+				{
+					ubyte[3] col = ColorTable[layer1+16];
+					ComputedPixels[p] = col[0];
+					ComputedPixels[p+1] = col[1];
+					ComputedPixels[p+2] = col[2];
+				}
+				else if(DM[0] == 3)
+				{
+					ubyte[3] col = ColorTable[layer0];
+					ubyte[3] col2 = ColorTable[layer1+16];
+					ComputedPixels[p] = cast(ubyte)min(col[0]+col2[0],255);
+					ComputedPixels[p+1] = cast(ubyte)min(col[1]+col2[1],255);
+					ComputedPixels[p+2] = cast(ubyte)min(col[2]+col2[2],255);
 				}
 			}
 		}
@@ -452,7 +567,7 @@ MainApp app;
 
 PACK[] cdg;
 
-ulong playindex = 0;
+ulong playindex = 27000;
 
 void main(string[] args)
 {
@@ -517,9 +632,12 @@ void main(string[] args)
 		glClear(GL_COLOR_BUFFER_BIT);
 		glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE);
 		
-		foreach(i;0..15)
+		for(int i = 0; i < 10; i++)
 		{
-			ParsePack(cdg[playindex]);
+			if(ParsePack(cdg[playindex]))
+			{
+				//i--;
+			}
 			playindex++;
 			playindex %= cdg.length;
 		}

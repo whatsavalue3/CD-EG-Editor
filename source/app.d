@@ -431,7 +431,7 @@ class TimelinePanel : Panel
 	{
 		foreach(i; 0..300)
 		{
-			if(playindex+i > cdg.length)
+			if(playindex+i >= cdg.length)
 			{
 				break;
 			}
@@ -567,7 +567,7 @@ MainApp app;
 
 PACK[] cdg;
 
-ulong playindex = 27000;
+ulong playindex = 0;
 
 void main(string[] args)
 {
@@ -631,17 +631,11 @@ void main(string[] args)
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE);
-		
-		for(int i = 0; i < 10; i++)
+		for(int i = 0; i < 5 && playindex < cdg.length; playindex++)
 		{
-			if(ParsePack(cdg[playindex]))
-			{
-				//i--;
-			}
-			playindex++;
-			playindex %= cdg.length;
+			ParsePack(cdg[playindex]);
+			i++;
 		}
-		
 		DGUI_Draw(width,height);
 		
 		

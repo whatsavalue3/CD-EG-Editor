@@ -1,0 +1,17 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/cdui
+cdui.so
+cdui.dylib
+cdui.dll
+cdui.a
+cdui.lib
+cdui-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst
+*.cdg

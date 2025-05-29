@@ -5,6 +5,7 @@ import glfw3.api;
 import dgui;
 import bindbc.opengl.util;
 import std.algorithm;
+import gamut;
 
 
 extern(C) @nogc nothrow void errorCallback(int error, const(char)* description) {
@@ -125,6 +126,10 @@ void ParseExtendedPack(PACK p)
 	}
 	else if(p.instruction == Instruction.WRITE_FONT)
 	{
+		if(p.F_ROW >= 18 || p.F_COLUMN >= 50)
+		{
+			return;
+		}
 		foreach(row; 0..12)
 		{
 			foreach(collumn; 0..6)
@@ -136,6 +141,10 @@ void ParseExtendedPack(PACK p)
 	}
 	else if(p.instruction == Instruction.EX_XOR_ADDITONAL)
 	{
+		if(p.F_ROW >= 18 || p.F_COLUMN >= 50)
+		{
+			return;
+		}
 		foreach(row; 0..12)
 		{
 			foreach(collumn; 0..6)
@@ -151,17 +160,9 @@ void ParseExtendedPack(PACK p)
 		{
 			ulong j = i << 1;
 			ulong index = i+(p.instruction-Instruction.EX_LOAD_CLUT_BEGIN)*8;
-			ubyte[3] col = [cast(ubyte)((p.DATA[j]&0b111100)<<2),cast(ubyte)(((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x110000)<<2)),cast(ubyte)(((p.DATA[j+1]&0b1111)<<4))];
-			if((WM[0] & 1) != 0)
-			{
-				ColorTable[index][] &= 0xf;
-				ColorTable[index][] |= col[];
-			}
-			if((WM[0] & 2) != 0)
-			{
-				ColorTable[index][] &= 0xf;
-				ColorTable[index][] |= col[];
-			}
+			ubyte[3] col = [cast(ubyte)((p.DATA[j]&0b111100)<<2),cast(ubyte)(((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0b110000))),cast(ubyte)(((p.DATA[j+1]&0b1111)<<4))];
+			ColorTable[index][] &= 0xf;
+			ColorTable[index][] |= col[];
 		}
 	}
 	else if(p.instruction >= Instruction.EX_LOAD_CLUT_ADDITIONAL_BEGIN && p.instruction <= Instruction.EX_LOAD_CLUT_ADDITIONAL_END)
@@ -171,16 +172,8 @@ void ParseExtendedPack(PACK p)
 			ulong j = i;
 			ulong index = i+(p.instruction-Instruction.EX_LOAD_CLUT_ADDITIONAL_BEGIN)*16;
 			ubyte[3] col = [cast(ubyte)((p.DATA[j]&0b110000)>>2),cast(ubyte)(p.DATA[j]&0b1100),cast(ubyte)((p.DATA[j]&0b11)<<2)];
-			if((WM[0] & 1) != 0)
-			{
-				ColorTable[index][] &= 0xf0;
-				ColorTable[index][] |= col[];
-			}
-			if((WM[0] & 2) != 0)
-			{
-				ColorTable[index][] &= 0xf0;
-				ColorTable[index][] |= col[];
-			}
+			ColorTable[index][] &= 0xf0;
+			ColorTable[index][] |= col[];
 		}
 	}
 	else
@@ -202,6 +195,10 @@ bool ParsePack(PACK p)
 	}
 	if(p.instruction == Instruction.WRITE_FONT)
 	{
+		if(p.F_ROW >= 18 || p.F_COLUMN >= 50)
+		{
+			return false;
+		}
 		foreach(row; 0..12)
 		{
 			foreach(collumn; 0..6)
@@ -209,17 +206,21 @@ bool ParsePack(PACK p)
 				ubyte col = ((p.F_DATA[row] & (0x20>>collumn)) != 0) ? p.F_COLOR1 : p.F_COLOR0;
 				if((WM[0] & 1) != 0)
 				{
-					PIXELS[0][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = col;
+					PIXELS[0][row+(p.F_ROW&0x1f)*12][collumn+p.F_COLUMN*6] = col;
 				}
-				if((WM[0] & 2) != 0)
+				if((DM[0] != 0) && ((WM[0] & 2) != 0))
 				{
-					PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] = col;
+					PIXELS[1][row+(p.F_ROW&0x1f)*12][collumn+p.F_COLUMN*6] = col;
 				}
 			}
 		}
 	}
 	else if(p.instruction == Instruction.XOR_FONT)
 	{
+		if(p.F_ROW >= 18 || p.F_COLUMN >= 50)
+		{
+			return false;
+		}
 		foreach(row; 0..12)
 		{
 			foreach(collumn; 0..6)
@@ -229,7 +230,7 @@ bool ParsePack(PACK p)
 				{
 					PIXELS[0][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= col;
 				}
-				if((WM[0] & 2) != 0)
+				if((DM[0] != 0) && ((WM[0] & 2) != 0))
 				{
 					PIXELS[1][row+p.F_ROW*12][collumn+p.F_COLUMN*6] ^= col;
 				}
@@ -242,12 +243,12 @@ bool ParsePack(PACK p)
 		foreach(i; 0..8)
 		{
 			ulong j = i << 1;
-			ubyte[3] col = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x110000)<<2),((p.DATA[j+1]&0b1111)<<4)];
+			ubyte[3] col = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0b110000)),((p.DATA[j+1]&0b1111)<<4)];
 			if((WM[0] & 1) != 0)
 			{
 				ColorTable[i] = col;
 			}
-			if((WM[0] & 2) != 0)
+			if((DM[0] != 0) && (WM[0] & 2) != 0)
 			{
 				ColorTable[i+16] = col;
 			}
@@ -258,12 +259,12 @@ bool ParsePack(PACK p)
 		foreach(i; 0..8)
 		{
 			ulong j = i << 1;
-			ubyte[3] col = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0x110000)<<2),((p.DATA[j+1]&0b1111)<<4)];
+			ubyte[3] col = [(p.DATA[j]&0b111100)<<2,((p.DATA[j]&0b11)<<6)|((p.DATA[j+1]&0b110000)),((p.DATA[j+1]&0b1111)<<4)];
 			if((WM[0] & 1) != 0)
 			{
 				ColorTable[i+8] = col;
 			}
-			if((WM[0] & 2) != 0)
+			if((DM[0] != 0) && (WM[0] & 2) != 0)
 			{
 				ColorTable[i+8+16] = col;
 			}
@@ -424,7 +425,7 @@ class TimelinePanel : Panel
 	{
 		super(parent);
 		this.width = 300;
-		this.height = 24;
+		this.height = 40;
 	}
 	
 	override void DrawForeground()
@@ -462,11 +463,11 @@ class TimelinePanel : Panel
 				}
 			}
 		}
-		foreach(i, col; ColorTable)		{
+		foreach(i, col; ColorTable)
+		{
 			glBlendColor4ub(col[0],col[1],col[2],255);
 			DGUI_FillRect(cast(int)(i*8),24,8,8);
 		}
-
 	}
 }
 
@@ -490,7 +491,6 @@ class DisplayScreenPanel : Panel
 	
 	override void DrawBackground()
 	{
-		glBindTexture(GL_TEXTURE_2D,this.texid);
 		foreach(row; 0..18*12)
 		{
 			foreach(collumn; 0..50*6)
@@ -500,7 +500,9 @@ class DisplayScreenPanel : Panel
 				ubyte layer1 = PIXELS[1][row][collumn];
 				if(DM[0] == 0 && WM[0] == 3)
 				{
-					ubyte[3] col = ColorTable[(layer1<<4)+layer0];
+					ubyte[3] col = ColorTable[(layer1<<4) | layer0];
+					glBlendColor4ub((col[0]&0xc)<<4,(col[1]&0xc)<<4,(col[2]&0xc)<<4,255);
+					DGUI_FillRect(cast(int)(((layer1<<4) | layer0)*8),266,8,8);
 					ComputedPixels[p] = cast(ubyte)(col[0]);
 					ComputedPixels[p+1] = cast(ubyte)(col[1]);
 					ComputedPixels[p+2] = cast(ubyte)(col[2]);
@@ -544,16 +546,51 @@ class DisplayScreenPanel : Panel
 	}
 }
 
+class InsertPanel : Panel
+{
+	this(Panel parent)
+	{
+		super(parent);
+		new Button(this,"Image",&InsertImage);
+		this.height = 16;
+	}
+	
+	void InsertImage()
+	{
+		Image img;
+		img.loadFromFile("toimport.png");
+		foreach(y; 0..img.height())
+		{
+			ushort* scan = cast(ushort*)img.scanptr(y);
+			foreach(x; 0..img.width())
+			{
+				ushort r = scan[4*x + 0];
+				ushort g = scan[4*x + 1];
+				ushort b = scan[4*x + 2];
+				
+			}
+		}
+	}
+	
+	override void PerformLayout()
+	{
+		LayoutHorizontally();
+		Stretch();
+	}
+}
+
 class MainApp : Panel
 {
 	TimelinePanel timeline;
 	DisplayScreenPanel display;
+	InsertPanel insertpanel;
 	
 	this(Panel parent)
 	{
 		super(parent);
 		display = new DisplayScreenPanel(this);
 		timeline = new TimelinePanel(this);
+		insertpanel = new InsertPanel(this);
 	}
 	
 	override void PerformLayout()
@@ -567,7 +604,7 @@ MainApp app;
 
 PACK[] cdg;
 
-ulong playindex = 0;
+ulong playindex = 36500;
 
 void main(string[] args)
 {
@@ -631,7 +668,7 @@ void main(string[] args)
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		glBlendFuncSeparate(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE);
-		for(int i = 0; i < 5 && playindex < cdg.length; playindex++)
+		for(int i = 0; i < 15 && playindex < cdg.length; playindex++)
 		{
 			ParsePack(cdg[playindex]);
 			i++;

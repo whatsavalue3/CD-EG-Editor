@@ -3,6 +3,9 @@
 	"versions": {
 		"bindbc-loader": "1.1.5",
 		"bindbc-opengl": "1.1.1",
-		"glfw-d": "1.1.1"
+		"gamut": "3.3.2",
+		"glfw-d": "1.1.1",
+		"intel-intrinsics": "1.12.0",
+		"miniz": "0.0.2"
 	}
 }
